@@ -85,14 +85,26 @@ video-processor/
 └── package.json
 ```
 
-## セットアップ
+## ローカルセットアップ
 
 ### 必要要件
 
-- Node.js 20以上 (`.nvmrc`参照)
+- Node.js 22以上 (`.nvmrc`参照)
 - pnpm 9.15.4以上
-- PostgreSQL (ローカル開発用)
+- Docker & Docker Compose (PostgreSQL用)
 - FFmpeg
+
+```bash
+# macOS
+brew install node pnpm ffmpeg
+# Docker Desktop: https://www.docker.com/products/docker-desktop/
+
+# Ubuntu/Debian
+sudo apt-get install ffmpeg
+# Node.js: https://nodejs.org/ (v22+)
+# pnpm: corepack enable && corepack prepare pnpm@latest --activate
+# Docker: https://docs.docker.com/engine/install/
+```
 
 ### インストール
 
@@ -104,22 +116,22 @@ cd video-processor
 # 依存関係をインストール
 pnpm install
 
-# 環境変数を設定（上記「環境変数」セクションを参照）
-# apps/backend/.env と apps/webapp/.env を作成して必要な値を設定
-
-# データベースをセットアップ
-pnpm --filter backend db:push
+# 環境変数ファイルを作成（テンプレートからコピー）
+cp apps/backend/.env.example apps/backend/.env
+cp apps/webapp/.env.local.example apps/webapp/.env.local
+# 必要に応じて各 .env ファイルを編集（デフォルト値でローカル開発は可能）
 ```
 
 ### 開発サーバーの起動
 
 ```bash
 # フロントエンドとバックエンドを同時起動
+# (Docker ComposeでPostgreSQLも自動起動、DBスキーマも自動適用)
 pnpm dev
 ```
 
 - Frontend: http://localhost:3000
-- Backend: http://localhost:3001
+- Backend: http://localhost:8080
 
 ## コマンド一覧
 
@@ -161,22 +173,12 @@ pnpm --filter @video-processor/webapp test:e2e  # Playwright E2Eテスト
 
 ## 環境変数
 
-### Backend
+環境変数のテンプレートファイルが用意されています：
 
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/video_processor
-GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_CREDENTIALS_JSON={"type":"service_account","project_id":"..."}
-CORS_ORIGIN=http://localhost:3000
-ANTHROPIC_API_KEY=sk-ant-your-anthropic-api-key
-GOOGLE_DRIVE_OUTPUT_FOLDER_ID=your-google-drive-folder-id
-```
+- Backend: [`apps/backend/.env.example`](apps/backend/.env.example) → `apps/backend/.env` にコピー
+- Frontend: [`apps/webapp/.env.local.example`](apps/webapp/.env.local.example) → `apps/webapp/.env.local` にコピー
 
-### Frontend
-
-```env
-NEXT_PUBLIC_API_URL=http://localhost:3001
-```
+デフォルト値でローカル開発が可能です。AI機能やGoogle Drive連携を使う場合は、各APIキーを設定してください。詳細は `.env.example` ファイル内のコメントを参照してください。
 
 ## コントリビューション
 
