@@ -24,18 +24,21 @@ const scriptRepository = new ShortsScriptRepository(prisma);
 const sceneRepository = new ShortsSceneRepository(prisma);
 const publishTextRepository = new ShortsPublishTextRepository(prisma);
 
-// Initialize gateways
-const agenticAiGateway = new AnthropicAgenticClient();
-
-// Initialize use case
-const generatePublishTextUseCase = new GeneratePublishTextUseCase({
-  agenticAiGateway,
-  planningRepository,
-  scriptRepository,
-  sceneRepository,
-  publishTextRepository,
-  generateId: () => uuidv4(),
-});
+// Lazy use case (requires Anthropic API key)
+let _publishTextUseCase: GeneratePublishTextUseCase | null = null;
+function getGeneratePublishTextUseCase(): GeneratePublishTextUseCase {
+  if (!_publishTextUseCase) {
+    _publishTextUseCase = new GeneratePublishTextUseCase({
+      agenticAiGateway: new AnthropicAgenticClient(),
+      planningRepository,
+      scriptRepository,
+      sceneRepository,
+      publishTextRepository,
+      generateId: () => uuidv4(),
+    });
+  }
+  return _publishTextUseCase;
+}
 
 /**
  * Request body for generating publish text
@@ -93,7 +96,7 @@ router.post('/', async (req, res, next) => {
       projectId: body.projectId,
     };
 
-    const result: GeneratePublishTextResult = await generatePublishTextUseCase.execute(input);
+    const result: GeneratePublishTextResult = await getGeneratePublishTextUseCase().execute(input);
 
     const response: GeneratePublishTextResponse = {
       publishTextId: result.publishTextId,

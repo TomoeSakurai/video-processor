@@ -30,8 +30,6 @@ const transcriptionRepository = new TranscriptionRepository(prisma);
 const refinedTranscriptionRepository = new RefinedTranscriptionRepository(prisma);
 
 // Initialize clients
-const gcsClient = new GcsClient();
-const googleDriveClient = GoogleDriveClient.fromEnv();
 const clipSubtitleComposer = new ClipSubtitleComposeClient();
 
 // Initialize gateways based on environment
@@ -43,18 +41,33 @@ function createTempStorageGateway(): TempStorageGateway {
 }
 
 const tempStorageGateway = createTempStorageGateway();
-const storageGateway = GoogleDriveClient.fromEnv();
 
-// Initialize use cases
-const generateClipSubtitlesUseCase = new GenerateClipSubtitlesUseCase({
-  clipRepository,
-  clipSubtitleRepository,
-  transcriptionRepository,
-  refinedTranscriptionRepository,
-  aiGateway: new AnthropicClient(),
-  generateId: () => uuidv4(),
-});
+// Lazy singleton for GoogleDriveClient (requires credentials not available in local dev)
+let _googleDriveClient: GoogleDriveClient | null = null;
+function getGoogleDriveClient(): GoogleDriveClient {
+  if (!_googleDriveClient) {
+    _googleDriveClient = GoogleDriveClient.fromEnv();
+  }
+  return _googleDriveClient;
+}
 
+// Lazy use case (requires Anthropic API key)
+let _generateClipSubtitlesUseCase: GenerateClipSubtitlesUseCase | null = null;
+function getGenerateClipSubtitlesUseCase(): GenerateClipSubtitlesUseCase {
+  if (!_generateClipSubtitlesUseCase) {
+    _generateClipSubtitlesUseCase = new GenerateClipSubtitlesUseCase({
+      clipRepository,
+      clipSubtitleRepository,
+      transcriptionRepository,
+      refinedTranscriptionRepository,
+      aiGateway: new AnthropicClient(),
+      generateId: () => uuidv4(),
+    });
+  }
+  return _generateClipSubtitlesUseCase;
+}
+
+// Initialize use cases (no external credentials required)
 const getClipSubtitlesUseCase = new GetClipSubtitlesUseCase({
   clipSubtitleRepository,
 });
@@ -67,25 +80,38 @@ const confirmClipSubtitlesUseCase = new ConfirmClipSubtitlesUseCase({
   clipSubtitleRepository,
 });
 
-const getClipVideoUrlUseCase = new GetClipVideoUrlUseCase({
-  clipRepository,
-  storageGateway,
-  tempStorageGateway,
-});
-
 const composeSubtitledClipUseCase = new ComposeSubtitledClipUseCase({
   clipRepository,
   clipSubtitleRepository,
   clipSubtitleComposer,
-  tempStorage: gcsClient,
+  tempStorage: tempStorageGateway,
 });
 
-const uploadSubtitledClipToDriveUseCase = new UploadSubtitledClipToDriveUseCase({
-  clipRepository,
-  storage: googleDriveClient,
-  tempStorage: gcsClient,
-  outputFolderId: process.env.GOOGLE_DRIVE_OUTPUT_FOLDER_ID,
-});
+// Lazy use cases (require Google Drive credentials)
+let _getClipVideoUrlUseCase: GetClipVideoUrlUseCase | null = null;
+function getGetClipVideoUrlUseCase(): GetClipVideoUrlUseCase {
+  if (!_getClipVideoUrlUseCase) {
+    _getClipVideoUrlUseCase = new GetClipVideoUrlUseCase({
+      clipRepository,
+      storageGateway: getGoogleDriveClient(),
+      tempStorageGateway,
+    });
+  }
+  return _getClipVideoUrlUseCase;
+}
+
+let _uploadSubtitledClipToDriveUseCase: UploadSubtitledClipToDriveUseCase | null = null;
+function getUploadSubtitledClipToDriveUseCase(): UploadSubtitledClipToDriveUseCase {
+  if (!_uploadSubtitledClipToDriveUseCase) {
+    _uploadSubtitledClipToDriveUseCase = new UploadSubtitledClipToDriveUseCase({
+      clipRepository,
+      storage: getGoogleDriveClient(),
+      tempStorage: tempStorageGateway,
+      outputFolderId: process.env.GOOGLE_DRIVE_OUTPUT_FOLDER_ID,
+    });
+  }
+  return _uploadSubtitledClipToDriveUseCase;
+}
 
 /**
  * POST /api/clips/:clipId/subtitles/generate
@@ -94,7 +120,7 @@ const uploadSubtitledClipToDriveUseCase = new UploadSubtitledClipToDriveUseCase(
 router.post('/clips/:clipId/subtitles/generate', async (req, res, next) => {
   try {
     const { clipId } = req.params;
-    const result = await generateClipSubtitlesUseCase.execute(clipId ?? '');
+    const result = await getGenerateClipSubtitlesUseCase().execute(clipId ?? '');
     res.status(201).json(result);
   } catch (error) {
     next(error);
@@ -154,7 +180,7 @@ router.post('/clips/:clipId/subtitles/confirm', async (req, res, next) => {
 router.get('/clips/:clipId/video-url', async (req, res, next) => {
   try {
     const { clipId } = req.params;
-    const result = await getClipVideoUrlUseCase.execute(clipId ?? '');
+    const result = await getGetClipVideoUrlUseCase().execute(clipId ?? '');
     res.json(result);
   } catch (error) {
     next(error);
@@ -263,7 +289,7 @@ router.post('/clips/:clipId/upload-to-drive', async (req, res, next) => {
   try {
     const { clipId } = req.params;
     const { folderId } = req.body as { folderId?: string };
-    const result = await uploadSubtitledClipToDriveUseCase.execute({
+    const result = await getUploadSubtitledClipToDriveUseCase().execute({
       clipId: clipId ?? '',
       folderId,
     });

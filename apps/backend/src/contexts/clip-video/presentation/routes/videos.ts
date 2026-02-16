@@ -76,16 +76,16 @@ function createTempStorageGateway(): TempStorageGateway {
 
 const tempStorageGateway = createTempStorageGateway();
 
-// Initialize shared gateway
-const storageGateway = GoogleDriveClient.fromEnv();
+// Lazy singleton for GoogleDriveClient (requires credentials not available in local dev)
+let _googleDriveClient: GoogleDriveClient | null = null;
+function getGoogleDriveClient(): GoogleDriveClient {
+  if (!_googleDriveClient) {
+    _googleDriveClient = GoogleDriveClient.fromEnv();
+  }
+  return _googleDriveClient;
+}
 
-// Initialize use cases
-const submitVideoUseCase = new SubmitVideoUseCase({
-  videoRepository,
-  storageGateway,
-  generateId: () => uuidv4(),
-});
-
+// Use cases that don't require Google Drive credentials
 const getVideosUseCase = new GetVideosUseCase({
   videoRepository,
 });
@@ -97,71 +97,25 @@ const getVideoUseCase = new GetVideoUseCase({
   transcriptionRepository,
 });
 
-const extractClipsUseCase = new ExtractClipsUseCase({
-  videoRepository,
-  clipRepository,
-  transcriptionRepository,
-  refinedTranscriptionRepository,
-  storageGateway,
-  tempStorageGateway,
-  aiGateway: new AnthropicClient(),
-  videoProcessingGateway: new FFmpegClient(),
-  generateId: () => uuidv4(),
-  outputFolderId: process.env.GOOGLE_DRIVE_OUTPUT_FOLDER_ID,
-});
-
-const extractClipByTimeUseCase = new ExtractClipByTimeUseCase({
-  videoRepository,
-  clipRepository,
-  transcriptionRepository,
-  refinedTranscriptionRepository,
-  storageGateway,
-  tempStorageGateway,
-  videoProcessingGateway: new FFmpegClient(),
-  aiGateway: new AnthropicClient(),
-  generateId: () => uuidv4(),
-  outputFolderId: process.env.GOOGLE_DRIVE_OUTPUT_FOLDER_ID,
-});
-
-const refineTranscriptUseCase = new RefineTranscriptUseCase({
-  transcriptionRepository,
-  refinedTranscriptionRepository,
-  videoRepository,
-  storageGateway,
-  aiGateway: new AnthropicClient(),
-  generateId: () => uuidv4(),
-  loadDictionary,
-  transcriptOutputFolderId: process.env.TRANSCRIPT_OUTPUT_FOLDER_ID,
-});
-
-// Initialize sub-usecases for CreateTranscriptUseCase
-
-const cacheVideoUseCase = new CacheVideoUseCase({
-  videoRepository,
-  storageGateway,
-  tempStorageGateway,
-});
-
 const extractAudioUseCase = new ExtractAudioUseCase({
   videoRepository,
   tempStorageGateway,
   videoProcessingGateway: new FFmpegClient(),
 });
 
-const transcribeAudioUseCase = new TranscribeAudioUseCase({
-  videoRepository,
-  transcriptionRepository,
-  transcriptionGateway: new SpeechToTextClient(),
-  generateId: () => uuidv4(),
-});
-
-const createTranscriptUseCase = new CreateTranscriptUseCase({
-  videoRepository,
-  cacheVideoUseCase,
-  extractAudioUseCase,
-  transcribeAudioUseCase,
-  refineTranscriptUseCase,
-});
+// Lazy singleton for SpeechToTextClient (requires GOOGLE_CLOUD_PROJECT)
+let _transcribeAudioUseCase: TranscribeAudioUseCase | null = null;
+function getTranscribeAudioUseCase(): TranscribeAudioUseCase {
+  if (!_transcribeAudioUseCase) {
+    _transcribeAudioUseCase = new TranscribeAudioUseCase({
+      videoRepository,
+      transcriptionRepository,
+      transcriptionGateway: new SpeechToTextClient(),
+      generateId: () => uuidv4(),
+    });
+  }
+  return _transcribeAudioUseCase;
+}
 
 const deleteVideoUseCase = new DeleteVideoUseCase({
   videoRepository,
@@ -173,6 +127,90 @@ const resetVideoUseCase = new ResetVideoUseCase({
   refinedTranscriptionRepository,
 });
 
+// Lazy use cases (require Google Drive credentials)
+interface DriveUseCases {
+  submitVideoUseCase: SubmitVideoUseCase;
+  extractClipsUseCase: ExtractClipsUseCase;
+  extractClipByTimeUseCase: ExtractClipByTimeUseCase;
+  refineTranscriptUseCase: RefineTranscriptUseCase;
+  cacheVideoUseCase: CacheVideoUseCase;
+  createTranscriptUseCase: CreateTranscriptUseCase;
+}
+
+let _driveUseCases: DriveUseCases | null = null;
+function getDriveUseCases(): DriveUseCases {
+  if (!_driveUseCases) {
+    const storageGateway = getGoogleDriveClient();
+
+    const submitVideoUseCase = new SubmitVideoUseCase({
+      videoRepository,
+      storageGateway,
+      generateId: () => uuidv4(),
+    });
+
+    const extractClipsUseCase = new ExtractClipsUseCase({
+      videoRepository,
+      clipRepository,
+      transcriptionRepository,
+      refinedTranscriptionRepository,
+      storageGateway,
+      tempStorageGateway,
+      aiGateway: new AnthropicClient(),
+      videoProcessingGateway: new FFmpegClient(),
+      generateId: () => uuidv4(),
+      outputFolderId: process.env.GOOGLE_DRIVE_OUTPUT_FOLDER_ID,
+    });
+
+    const extractClipByTimeUseCase = new ExtractClipByTimeUseCase({
+      videoRepository,
+      clipRepository,
+      transcriptionRepository,
+      refinedTranscriptionRepository,
+      storageGateway,
+      tempStorageGateway,
+      videoProcessingGateway: new FFmpegClient(),
+      aiGateway: new AnthropicClient(),
+      generateId: () => uuidv4(),
+      outputFolderId: process.env.GOOGLE_DRIVE_OUTPUT_FOLDER_ID,
+    });
+
+    const refineTranscriptUseCase = new RefineTranscriptUseCase({
+      transcriptionRepository,
+      refinedTranscriptionRepository,
+      videoRepository,
+      storageGateway,
+      aiGateway: new AnthropicClient(),
+      generateId: () => uuidv4(),
+      loadDictionary,
+      transcriptOutputFolderId: process.env.TRANSCRIPT_OUTPUT_FOLDER_ID,
+    });
+
+    const cacheVideoUseCase = new CacheVideoUseCase({
+      videoRepository,
+      storageGateway,
+      tempStorageGateway,
+    });
+
+    const createTranscriptUseCase = new CreateTranscriptUseCase({
+      videoRepository,
+      cacheVideoUseCase,
+      extractAudioUseCase,
+      transcribeAudioUseCase: getTranscribeAudioUseCase(),
+      refineTranscriptUseCase,
+    });
+
+    _driveUseCases = {
+      submitVideoUseCase,
+      extractClipsUseCase,
+      extractClipByTimeUseCase,
+      refineTranscriptUseCase,
+      cacheVideoUseCase,
+      createTranscriptUseCase,
+    };
+  }
+  return _driveUseCases;
+}
+
 /**
  * POST /api/videos
  * Register a video (does not start processing)
@@ -180,7 +218,7 @@ const resetVideoUseCase = new ResetVideoUseCase({
 router.post('/', async (req, res, next) => {
   try {
     const body = req.body as SubmitVideoRequest;
-    const result = await submitVideoUseCase.execute({
+    const result = await getDriveUseCases().submitVideoUseCase.execute({
       googleDriveUrl: body.googleDriveUrl,
     });
     res.status(201).json(result);
@@ -205,9 +243,11 @@ router.post('/:videoId/transcribe', async (req, res, next) => {
     res.status(202).json(response);
 
     // Execute transcription in background (fire and forget)
-    createTranscriptUseCase.execute(videoId ?? '').catch((error) => {
-      logger.error('[VideosRoute] Background transcription failed', error as Error, { videoId });
-    });
+    getDriveUseCases()
+      .createTranscriptUseCase.execute(videoId ?? '')
+      .catch((error) => {
+        logger.error('[VideosRoute] Background transcription failed', error as Error, { videoId });
+      });
   } catch (error) {
     next(error);
   }
@@ -220,7 +260,7 @@ router.post('/:videoId/transcribe', async (req, res, next) => {
 router.post('/:videoId/cache', async (req, res, next) => {
   try {
     const { videoId } = req.params;
-    const result = await cacheVideoUseCase.execute(videoId ?? '');
+    const result = await getDriveUseCases().cacheVideoUseCase.execute(videoId ?? '');
 
     const response: CacheVideoResponse = {
       videoId: result.videoId,
@@ -263,13 +303,13 @@ router.post('/:videoId/transcribe-audio', async (req, res, next) => {
     const { videoId } = req.params;
 
     // Step 1: Cache video (auto-skips if already cached)
-    await cacheVideoUseCase.execute(videoId ?? '');
+    await getDriveUseCases().cacheVideoUseCase.execute(videoId ?? '');
 
     // Step 2: Extract audio (stream version - uploads to GCS)
     const audioResult = await extractAudioUseCase.execute(videoId ?? '', 'flac');
 
     // Step 3: Transcribe audio from GCS URI
-    const transcribeResult = await transcribeAudioUseCase.execute({
+    const transcribeResult = await getTranscribeAudioUseCase().execute({
       videoId: videoId ?? '',
       audioGcsUri: audioResult.audioGcsUri,
     });
@@ -304,7 +344,7 @@ router.post('/:videoId/extract-clips', async (req, res, next) => {
     // Validate and normalize paddingColor (only for vertical format)
     const paddingColor = body.paddingColor === '#30bca7' ? '#30bca7' : ('#000000' as const);
 
-    const result = await extractClipsUseCase.execute({
+    const result = await getDriveUseCases().extractClipsUseCase.execute({
       videoId: videoId ?? '',
       clipInstructions: body.clipInstructions,
       multipleClips: body.multipleClips ?? false,
@@ -325,7 +365,7 @@ router.post('/:videoId/extract-clip-by-time', async (req, res, next) => {
   try {
     const { videoId } = req.params;
     const body = req.body as ExtractClipByTimeRequest;
-    const result = await extractClipByTimeUseCase.execute({
+    const result = await getDriveUseCases().extractClipByTimeUseCase.execute({
       videoId: videoId ?? '',
       startTimeSeconds: body.startTimeSeconds,
       endTimeSeconds: body.endTimeSeconds,
@@ -441,7 +481,7 @@ router.post('/:videoId/refine-transcript', async (req, res, next) => {
     const { videoId } = req.params;
 
     // Execute refinement and wait for completion
-    await refineTranscriptUseCase.execute(videoId ?? '');
+    await getDriveUseCases().refineTranscriptUseCase.execute(videoId ?? '');
 
     const response: RefineTranscriptResponse = {
       videoId: videoId ?? '',

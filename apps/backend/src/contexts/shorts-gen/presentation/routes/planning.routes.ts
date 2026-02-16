@@ -21,20 +21,24 @@ import { v4 as uuidv4 } from 'uuid';
 const log = createLogger('PlanningRoutes');
 const router: ExpressRouter = Router();
 
-// Initialize repositories and clients
+// Initialize repositories
 const projectRepository = new ShortsProjectRepository(prisma);
 const planningRepository = new ShortsPlanningRepository(prisma);
-const agenticAiGateway = new AnthropicAgenticClient();
-const urlContentFetcherGateway = new JinaUrlContentFetcherClient();
 
-// Initialize use cases
-const generatePlanningUseCase = new GeneratePlanningUseCase({
-  agenticAiGateway,
-  planningRepository,
-  projectRepository,
-  urlContentFetcherGateway,
-  generateId: () => uuidv4(),
-});
+// Lazy use case (requires Anthropic API key)
+let _planningUseCase: GeneratePlanningUseCase | null = null;
+function getGeneratePlanningUseCase(): GeneratePlanningUseCase {
+  if (!_planningUseCase) {
+    _planningUseCase = new GeneratePlanningUseCase({
+      agenticAiGateway: new AnthropicAgenticClient(),
+      planningRepository,
+      projectRepository,
+      urlContentFetcherGateway: new JinaUrlContentFetcherClient(),
+      generateId: () => uuidv4(),
+    });
+  }
+  return _planningUseCase;
+}
 
 /**
  * Request body for generating planning
@@ -91,7 +95,7 @@ router.post('/:projectId/planning/generate', async (req, res, next) => {
 
     try {
       // Use streaming execution
-      const stream = generatePlanningUseCase.executeStream(input);
+      const stream = getGeneratePlanningUseCase().executeStream(input);
 
       for await (const chunk of stream) {
         const data = JSON.stringify(chunk);
@@ -158,7 +162,7 @@ router.post('/:projectId/planning/generate-sync', async (req, res, next) => {
       conversationHistory: body.conversationHistory,
     };
 
-    const result = await generatePlanningUseCase.execute(input);
+    const result = await getGeneratePlanningUseCase().execute(input);
 
     log.info('Sync planning generation completed', {
       projectId,

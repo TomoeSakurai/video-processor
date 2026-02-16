@@ -20,22 +20,26 @@ import { v4 as uuidv4 } from 'uuid';
 const log = createLogger('ScriptRoutes');
 const router: ExpressRouter = Router();
 
-// Initialize repositories and clients
+// Initialize repositories
 const planningRepository = new ShortsPlanningRepository(prisma);
 const scriptRepository = new ShortsScriptRepository(prisma);
 const sceneRepository = new ShortsSceneRepository(prisma);
-const agenticAiGateway = new AnthropicAgenticClient();
-const assetRegistryGateway = new AssetRegistryClient();
 
-// Initialize use cases
-const generateScriptUseCase = new GenerateScriptUseCase({
-  agenticAiGateway,
-  planningRepository,
-  scriptRepository,
-  sceneRepository,
-  assetRegistryGateway,
-  generateId: () => uuidv4(),
-});
+// Lazy use case (requires Anthropic API key)
+let _scriptUseCase: GenerateScriptUseCase | null = null;
+function getGenerateScriptUseCase(): GenerateScriptUseCase {
+  if (!_scriptUseCase) {
+    _scriptUseCase = new GenerateScriptUseCase({
+      agenticAiGateway: new AnthropicAgenticClient(),
+      planningRepository,
+      scriptRepository,
+      sceneRepository,
+      assetRegistryGateway: new AssetRegistryClient(),
+      generateId: () => uuidv4(),
+    });
+  }
+  return _scriptUseCase;
+}
 
 const createManualScriptUseCase = new CreateManualScriptUseCase({
   planningRepository,
@@ -228,7 +232,7 @@ router.post('/:projectId/script/generate', async (req, res, next) => {
 
     try {
       // Use streaming execution
-      const result = await generateScriptUseCase.executeStream(input);
+      const result = await getGenerateScriptUseCase().executeStream(input);
 
       for await (const chunk of result.stream) {
         const data = JSON.stringify(chunk);
@@ -299,7 +303,7 @@ router.post('/:projectId/script/generate-sync', async (req, res, next) => {
       conversationHistory: body.conversationHistory,
     };
 
-    const result = await generateScriptUseCase.execute(input);
+    const result = await getGenerateScriptUseCase().execute(input);
 
     log.info('Sync script generation completed', {
       projectId,
